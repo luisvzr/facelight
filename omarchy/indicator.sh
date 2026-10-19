@@ -34,5 +34,5 @@ if ! grep -q '"Facelight"' "$manifest"; then
     "$manifest" >"$manifest.tmp" && mv "$manifest.tmp" "$manifest"
 fi
 
-echo "Facelight added to $dir. Hover the indicators next to the clock to see it."
+echo "Facelight indicator added to $dir."
 echo "If you set an explicit \"items\" list for the indicators widget in shell.json, add \"Facelight\" to it."
