@@ -52,7 +52,12 @@
 #define HOLE_SIZE 720 // side of the hole's box: 480 + 2*120 pt
 #define FADE_MS 300
 #define TICK_MS 16
-#define SETTLE_MS 1000 // browsers open and close /dev/video* while enumerating devices
+#define SETTLE_MS 1000 // wait after an open/close event before looking
+// Browsers open the camera for a moment to enumerate or probe it (Chrome does it
+// every ~3 s during a call with the camera off), so it only counts as on after
+// staying open across CONFIRM_CHECKS checks CONFIRM_MS apart.
+#define CONFIRM_MS 500
+#define CONFIRM_CHECKS 6
 #define FALLBACK_S 10
 
 enum override { AUTO, FORCE_ON, FORCE_OFF };
@@ -103,6 +108,7 @@ static double fade_start;
 static int alpha_now; // 0..256
 static char hypr_sock[108], run_dir[256];
 static int tick_fd, settle_fd, fallback_fd, ino_fd, sig_fd;
+static int confirm_hits;
 
 static double gauss(double t) { return exp(-0.5 * (t * 2.5) * (t * 2.5)); }
 
@@ -178,6 +184,20 @@ static bool camera_in_use(void) {
     }
     closedir(proc);
     return found;
+}
+
+// Runs when settle_fd fires: off as soon as nobody holds the camera, on only
+// after it has been held continuously.
+static void check_camera(void) {
+    if (!camera_in_use()) {
+        confirm_hits = 0;
+        camera_on = false;
+    } else if (!camera_on && ++confirm_hits < CONFIRM_CHECKS) {
+        arm(settle_fd, CONFIRM_MS, 0);
+    } else {
+        confirm_hits = 0;
+        camera_on = true;
+    }
 }
 
 static void add_watches(void) {
@@ -626,7 +646,7 @@ int main(int argc, char **argv) {
     fallback_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
     add_watches();
     arm(fallback_fd, FALLBACK_S * 1000, FALLBACK_S * 1000);
-    camera_on = camera_in_use();
+    arm(settle_fd, 1, 0); // first check goes through the same confirmation
     want_shown = !(opt.mode == FORCE_ON || camera_on); // force the first state write
     update_state();
 
@@ -666,14 +686,13 @@ int main(int argc, char **argv) {
         }
         if (fds[4].revents & POLLIN) {
             if (read(settle_fd, &exp, sizeof exp) > 0) {}
-            if (!quitting) camera_on = camera_in_use();
+            if (!quitting) check_camera();
             update_state();
         }
         if (fds[5].revents & POLLIN) {
             if (read(fallback_fd, &exp, sizeof exp) > 0) {}
             add_watches(); // cameras plugged in after startup
-            if (!quitting) camera_on = camera_in_use();
-            update_state();
+            if (!quitting && !confirm_hits) arm(settle_fd, 1, 0);
         }
         if (fds[3].revents & POLLIN) {
             if (read(tick_fd, &exp, sizeof exp) > 0) {}
