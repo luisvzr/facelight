@@ -1,0 +1,11 @@
+[Unit]
+Description=facelight: screen ring light while the camera is on
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=@BINDIR@/facelight
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
